@@ -31,7 +31,7 @@ func min(i, j int) int {
 // historyIdxValue returns an index into a valid range of history
 func historyIdxValue(idx int, history [][]byte) int {
 	out := idx
-	out = min(len(history), out)
+	out = min(len(history)-1, out)
 	out = max(0, out)
 	return out
 }
