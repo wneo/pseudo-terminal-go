@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sync"
+	"syscall"
+	"unsafe"
 )
 
 func max(i, j int) int {
@@ -31,6 +34,48 @@ func historyIdxValue(idx int, history [][]byte) int {
 	out = min(len(history), out)
 	out = max(0, out)
 	return out
+}
+
+// terminalWidth returns width of the terminal.
+const (
+	TIOCGWINSZ     = 0x5413
+	TIOCGWINSZ_OSX = 1074295912
+)
+
+var tty *os.File
+
+const sysIoctl = syscall.SYS_IOCTL
+
+func init() {
+	var err error
+	tty, err = os.Open("/dev/tty")
+	if err != nil {
+		tty = os.Stdin
+	}
+}
+
+type window struct {
+	Row    uint16
+	Col    uint16
+	Xpixel uint16
+	Ypixel uint16
+}
+
+func terminalWidth() (int, error) {
+	w := new(window)
+	tio := syscall.TIOCGWINSZ
+	if runtime.GOOS == "darwin" {
+		tio = TIOCGWINSZ_OSX
+	}
+	res, _, err := syscall.Syscall(sysIoctl,
+		tty.Fd(),
+		uintptr(tio),
+		uintptr(unsafe.Pointer(w)),
+	)
+	if int(res) == -1 {
+		return 0, err
+	}
+	return int(w.Col), nil
 }
 
 // EscapeCodes contains escape sequences that can be written to the terminal in
@@ -95,7 +140,8 @@ type Terminal struct {
 	// maxLine is the greatest value of cursorY so far.
 	maxLine int
 
-	termWidth, termHeight int
+	//termWidth,
+	termHeight int
 
 	// outBuf contains the terminal data to be sent.
 	outBuf []byte
@@ -116,10 +162,17 @@ func NewTerminal(c io.ReadWriter, prompt string) *Terminal {
 		prompt:     prompt,
 		history:    make([][]byte, 0, 100),
 		historyIdx: -1,
-		termWidth:  80,
-		termHeight: 24,
+		//termWidth:  80,
+		termHeight: 1000,
 		echo:       true,
 	}
+}
+func (t *Terminal) termWidth() int {
+	v, _ := terminalWidth()
+	if v <= 0 {
+		v = 512
+	}
+	return v
 }
 
 const (
@@ -207,9 +260,20 @@ func (t *Terminal) moveCursorToPos(pos int) {
 		return
 	}
 
+	var err error
+	if debugFile == nil {
+		debugFile, err = os.OpenFile("./debug.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			fmt.Println("openfile failed:", err)
+		}
+	}
+
 	x := len(t.prompt) + pos
-	y := x / t.termWidth
-	x = x % t.termWidth
+	y := x / t.termWidth()
+
+	debugFile.WriteString(fmt.Sprintln("move org:", t.prompt, t.termWidth(), pos, x, y))
+
+	x = x % t.termWidth()
 
 	up := 0
 	if y < t.cursorY {
@@ -233,8 +297,13 @@ func (t *Terminal) moveCursorToPos(pos int) {
 
 	t.cursorX = x
 	t.cursorY = y
+
+	debugFile.WriteString(fmt.Sprintln("move:", up, down, left, right, x, y, t.termWidth(), t.cursorX, t.cursorY))
+
 	t.move(up, down, left, right)
 }
+
+var debugFile *os.File
 
 func (t *Terminal) move(up, down, left, right int) {
 	movement := make([]byte, 3*(up+down+left+right))
@@ -457,7 +526,7 @@ func (t *Terminal) handleKey(key int) (line string, ok bool) {
 		if t.echo {
 			t.writeLine(t.line[t.pos-1:])
 		}
-		t.pos ++
+		t.pos++
 		t.moveCursorToPos(t.pos)
 		t.queue([]byte("\r\n"))
 		t.line = make([]byte, 0, 0)
@@ -510,7 +579,7 @@ func (t *Terminal) handleKey(key int) (line string, ok bool) {
 
 func (t *Terminal) writeLine(line []byte) {
 	for len(line) != 0 {
-		remainingOnLine := t.termWidth - t.cursorX
+		remainingOnLine := t.termWidth() - t.cursorX
 		todo := len(line)
 		if todo > remainingOnLine {
 			todo = remainingOnLine
@@ -519,7 +588,7 @@ func (t *Terminal) writeLine(line []byte) {
 		t.cursorX += todo
 		line = line[todo:]
 
-		if t.cursorX == t.termWidth {
+		if t.cursorX == t.termWidth() {
 			t.cursorX = 0
 			t.cursorY++
 			if t.cursorY > t.maxLine {
@@ -566,8 +635,8 @@ func (t *Terminal) Write(buf []byte) (n int, err error) {
 		t.queue(t.line)
 		chars += len(t.line)
 	}
-	t.cursorX = chars % t.termWidth
-	t.cursorY = chars / t.termWidth
+	t.cursorX = chars % t.termWidth()
+	t.cursorY = chars / t.termWidth()
 	t.moveCursorToPos(t.pos)
 
 	if _, err = t.c.Write(t.outBuf); err != nil {
@@ -640,8 +709,9 @@ func (t *Terminal) readLine() (line string, err error) {
 		t.c.Write(t.outBuf)
 		t.outBuf = t.outBuf[:0]
 		if lineOk {
-			if t.echo { //&& len(line) > 0 {
+			if t.echo && len(line) > 0 {
 				// don't put passwords into history...
+
 				b := []byte(line)
 				h := make([]byte, len(b))
 				copy(h, b)
@@ -679,8 +749,8 @@ func (t *Terminal) SetPrompt(prompt string) {
 func (t *Terminal) SetSize(width, height int) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-
-	t.termWidth, t.termHeight = width, height
+	t.termHeight = height
+	//t.termWidth(), t.termHeight = width, height
 }
 
 func (t *Terminal) SetHistory(h []string) {
