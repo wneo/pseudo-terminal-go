@@ -260,18 +260,18 @@ func (t *Terminal) moveCursorToPos(pos int) {
 		return
 	}
 
-	var err error
-	if debugFile == nil {
-		debugFile, err = os.OpenFile("./debug.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			fmt.Println("openfile failed:", err)
-		}
-	}
+	// var err error
+	// if debugFile == nil {
+	// 	debugFile, err = os.OpenFile("./debug.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0666)
+	// 	if err != nil {
+	// 		fmt.Println("openfile failed:", err)
+	// 	}
+	// }
 
 	x := len(t.prompt) + pos
 	y := x / t.termWidth()
 
-	debugFile.WriteString(fmt.Sprintln("move org:", t.prompt, t.termWidth(), pos, x, y))
+	//debugFile.WriteString(fmt.Sprintln("move org:", t.prompt, t.termWidth(), pos, x, y))
 
 	x = x % t.termWidth()
 
@@ -298,12 +298,12 @@ func (t *Terminal) moveCursorToPos(pos int) {
 	t.cursorX = x
 	t.cursorY = y
 
-	debugFile.WriteString(fmt.Sprintln("move:", up, down, left, right, x, y, t.termWidth(), t.cursorX, t.cursorY))
+	//debugFile.WriteString(fmt.Sprintln("move:", up, down, left, right, x, y, t.termWidth(), t.cursorX, t.cursorY))
 
 	t.move(up, down, left, right)
 }
 
-var debugFile *os.File
+//var debugFile *os.File
 
 func (t *Terminal) move(up, down, left, right int) {
 	movement := make([]byte, 3*(up+down+left+right))
